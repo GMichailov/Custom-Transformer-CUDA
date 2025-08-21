@@ -2,6 +2,8 @@
 
 cublasHandle_t handle;
 
+// Calculation Functions
+
 void single_attention_matrix_mul_gemm_2d(
     const torch::Tensor& src_a,
     const torch::Tensor& src_b,
@@ -35,6 +37,10 @@ void single_attention_matrix_mul_gemm_2d(
 
     dest.copy_(_dest);
 }
+
+// Positional Encoders
+
+// Attention
 
 torch::Tensor SingleHeadAttention::forward(
     torch::autograd::AutogradContext *ctx,
@@ -146,3 +152,6 @@ torch::autograd::tensor_list SingleHeadAttention::backward(
 
     return {dX.view_as(X), dWq, dWk, dWv};
 }
+
+
+// Activation Functions
