@@ -2,7 +2,7 @@
 
 cublasHandle_t handle;
 
-void single_attention_matrix_mul_gemm(
+void single_attention_matrix_mul_gemm_2d(
     const torch::Tensor& src_a,
     const torch::Tensor& src_b,
     torch::Tensor& dest
@@ -52,21 +52,21 @@ torch::Tensor SingleHeadAttention::forward(
     auto X_flattened = X.view({batch_size * seq_len, X.size(2)});
 
     // destination tensors
-    auto Q = torch::empty({batch_size, seq_len, d_model}, X.options());
-    auto K = torch::empty({batch_size, seq_len, d_model}, X.options());
-    auto V = torch::empty({batch_size, seq_len, d_model}, X.options());
+    auto Q = torch::empty({batch_size * seq_len, d_model}, X.options());
+    auto K = torch::empty({batch_size * seq_len, d_model}, X.options());
+    auto V = torch::empty({batch_size * seq_len, d_model}, X.options());
 
-    single_attention_matrix_mul_gemm(X_flattened, Wq, Q);
-    single_attention_matrix_mul_gemm(X_flattened, Wk, K);
-    single_attention_matrix_mul_gemm(X_flattened, Wv, V);
+    single_attention_matrix_mul_gemm_2d(X_flattened, Wq, Q);
+    single_attention_matrix_mul_gemm_2d(X_flattened, Wk, K);
+    single_attention_matrix_mul_gemm_2d(X_flattened, Wv, V);
 
     // softmax(QK^T / sqrt(D)) * V
     auto scores = torch::empty({batch_size * seq_len, batch_size * seq_len}, X.options());
-    single_attention_matrix_mul_gemm(Q, K.transpose(0, 1).contiguous(), scores);
+    single_attention_matrix_mul_gemm_2d(Q, K.transpose(0, 1).contiguous(), scores);
     scores /= std::sqrt((float)d_model);
     auto weights = torch::softmax(scores, -1);
     auto output = torch::empty({batch_size * seq_len, d_model}, X.options());
-    single_attention_matrix_mul_gemm(weights, V, output);
+    single_attention_matrix_mul_gemm_2d(weights, V, output);
 
     // For now, save everything, can do recomputes later when I have time.
     ctx->save_for_backward({X, Wq, Wk, Wv, Q, K, V, weights});
@@ -92,6 +92,18 @@ torch::autograd::tensor_list SingleHeadAttention::backward(
     auto V  = forward_pass_vars[6];
     auto weights = forward_pass_vars[7];
 
+    int batch_size = X.size(0);
+    int seq_len    = X.size(1);
+    int d_model    = Wq.size(1);
+
+    // Create flattened pointers because my function can only do 2D math right now.
+    auto X_flat       = X.view({batch_size * seq_len, X.size(2)});
+    auto dOutput_flat = dOutput.view({batch_size * seq_len, d_model});
+    auto Q_flat       = Q.view({batch_size * seq_len, d_model});
+    auto K_flat       = K.view({batch_size * seq_len, d_model});
+    auto V_flat       = V.view({batch_size * seq_len, d_model});
+    auto weights_flat = weights.view({batch_size * seq_len, batch_size * seq_len});
+
     // Create gradient tensor containers
     auto dX  = torch::empty_like(X);
     auto dWq = torch::empty_like(Wq);
@@ -105,32 +117,32 @@ torch::autograd::tensor_list SingleHeadAttention::backward(
     // dK = dScores ^ T * Q
     // dX = dQ * Wq^T + dk * Wk^T + dV * Wv^T
     // dWq = X^T * dQ
-    // dWq = X^T * dV
-    // dWq = X^T * dK
+    // dWk = X^T * dK
+    // dWv = X^T * dV
 
-    auto dV = torch::empty_like(V);
-    single_attention_matrix_mul_gemm(weights.transpose(1,2), dOutput, dV);
-    auto dWeights = torch::empty_like(weights);
-    single_attention_matrix_mul_gemm(dOutput, V.transpose(1,2), dWeights);
-    auto dScores = torch::_softmax_backward_data(dWeights, weights, -1, dWeights.scalar_type());
-    auto dQ = torch::empty_like(Q);
-    single_attention_matrix_mul_gemm(dScores, K, dQ);
-    auto dK = torch::empty_like(K);
-    single_attention_matrix_mul_gemm(dScores.transpose(1,2), Q, dK);
+    auto dV = torch::empty_like(V_flat);
+    single_attention_matrix_mul_gemm_2d(weights.transpose(0,1).contiguous(), dOutput_flat, dV);
+    auto dWeights = torch::empty_like(weights_flat);
+    single_attention_matrix_mul_gemm_2d(dOutput, V_flat.transpose(0,1).contiguous(), dWeights);
+    auto dScores = torch::_softmax_backward_data(dWeights, weights_flat, -1, dWeights.scalar_type());
+    auto dQ = torch::empty_like(Q_flat);
+    single_attention_matrix_mul_gemm_2d(dScores, K_flat, dQ);
+    auto dK = torch::empty_like(K_flat);
+    single_attention_matrix_mul_gemm_2d(dScores.transpose(0,1), Q_flat, dK);
 
-    auto dX_q = torch::empty_like(X);
-    auto dX_k = torch::empty_like(X);
-    auto dX_v = torch::empty_like(X);
+    auto dX_q = torch::empty_like(X_flat);
+    auto dX_k = torch::empty_like(X_flat);
+    auto dX_v = torch::empty_like(X_flat);
 
-    single_attention_matrix_mul_gemm(dQ, Wq.transpose(0,1), dX_q);
-    single_attention_matrix_mul_gemm(dK, Wk.transpose(0,1), dX_k);
-    single_attention_matrix_mul_gemm(dV, Wv.transpose(0,1), dX_v);
+    single_attention_matrix_mul_gemm_2d(dQ, Wq.transpose(0,1), dX_q);
+    single_attention_matrix_mul_gemm_2d(dK, Wk.transpose(0,1), dX_k);
+    single_attention_matrix_mul_gemm_2d(dV, Wv.transpose(0,1), dX_v);
 
-    dX = dX_q + dX_k + dX_v;
+    dX.copy_(dX_q).add_(dX_k).add_(dX_v);
 
-    single_attention_matrix_mul_gemm(X.transpose(0,1), dQ, dWq);
-    single_attention_matrix_mul_gemm(X.transpose(0,1), dK, dWk);
-    single_attention_matrix_mul_gemm(X.transpose(0,1), dV, dWv);
+    single_attention_matrix_mul_gemm_2d(X_flat.transpose(0,1), dQ, dWq);
+    single_attention_matrix_mul_gemm_2d(X_flat.transpose(0,1), dK, dWk);
+    single_attention_matrix_mul_gemm_2d(X_flat.transpose(0,1), dV, dWv);
 
-    return {dX, dWq, dWk, dWv};
+    return {dX.view_as(X), dWq, dWk, dWv};
 }

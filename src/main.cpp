@@ -1,15 +1,12 @@
 #include "Transformer.hpp"
 #include <iostream>
+#include <torch/autograd.h>
 
-int main() {
-    if (cublasCreate(&handle) != CUBLAS_STATUS_SUCCESS) {
-        std::cerr << "Failed to create cuBLAS handle!" << std::endl;
-        return -1;
-    }
 
+void logging_gradcheck() {
     std::cout << "Creating X and weight matrices.\n";
 
-    auto X = torch::randn({2, 3}, torch::dtype(torch::kFloat32).device(torch::kCUDA).requires_grad(true));
+    auto X = torch::randn({1, 2, 3}, torch::dtype(torch::kFloat32).device(torch::kCUDA).requires_grad(true));
     auto Wq = torch::randn({3, 3}, torch::dtype(torch::kFloat32).device(torch::kCUDA).requires_grad(true));
     auto Wk = torch::randn({3, 3}, torch::dtype(torch::kFloat32).device(torch::kCUDA).requires_grad(true));
     auto Wv = torch::randn({3, 3}, torch::dtype(torch::kFloat32).device(torch::kCUDA).requires_grad(true));
@@ -29,6 +26,13 @@ int main() {
     std::cout << "Grad Wq:\n" << Wq.grad().cpu() << std::endl;
     std::cout << "Grad Wk:\n" << Wk.grad().cpu() << std::endl;
     std::cout << "Grad Wv:\n" << Wv.grad().cpu() << std::endl;
+}
+
+int main() {
+    if (cublasCreate(&handle) != CUBLAS_STATUS_SUCCESS) {
+        std::cerr << "Failed to create cuBLAS handle!" << std::endl;
+        return -1;
+    }
 
     cublasDestroy(handle);
     return 0;
