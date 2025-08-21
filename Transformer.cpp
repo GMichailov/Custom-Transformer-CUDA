@@ -38,6 +38,44 @@ void single_attention_matrix_mul_gemm_2d(
     dest.copy_(_dest);
 }
 
+void multi_head_attention_matrix_mul_gemm_batched(
+    const torch::Tensor& src_a,
+    const torch::Tensor& src_b,
+    torch::Tensor& dest,
+    int batchCount
+)
+{
+    auto _src_a = src_a.contiguous();
+    auto _src_b = src_b.contiguous();
+    auto _dest = dest.contiguous();
+
+    int outer_left_dim = _src_a.size(1);
+    int inner_dim = _src_a.size(2);
+    int outer_right_dim = _src_b.size(2);
+
+    const float alpha = 1.0f;
+    const float beta = 0.0f;
+
+    long long stride_a = (long long)outer_left_dim * inner_dim;
+    long long stride_b = (long long)inner_dim * outer_right_dim;
+    long long stride_dest = (long long)outer_left_dim * outer_right_dim;
+
+    // Same swap as in 2D mul
+    cublasSgemmStridedBatched(
+        handle,
+        CUBLAS_OP_N, CUBLAS_OP_N,
+        outer_right_dim, outer_left_dim, inner_dim,
+        &alpha,
+        _src_b.data_ptr<float>(), outer_right_dim, stride_b,
+        _src_a.data_ptr<float>(), outer_left_dim, stride_a,
+        &beta,
+        _dest.data_ptr<float>(), outer_right_dim, stride_dest,
+        batchCount
+    );
+
+    dest.copy_(_dest);
+}
+
 // Positional Encoders
 
 // Attention
@@ -153,5 +191,120 @@ torch::autograd::tensor_list SingleHeadAttention::backward(
     return {dX.view_as(X), dWq, dWk, dWv};
 }
 
+torch::Tensor MultiHeadAttention::forward(
+    torch::autograd::AutogradContext *ctx,
+    torch::Tensor X,
+    torch::Tensor Wq,
+    torch::Tensor Wk,
+    torch::Tensor Wv,
+    int num_heads
+)
+{
+    int batch_size = X.size(0);
+    int seq_len = X.size(1);
+    int d_model = Wq.size(0);
+    int head_dim = d_model / num_heads;
+
+    auto X_flattened = X.view({batch_size * seq_len, d_model});
+
+    auto Q_all = torch::empty({batch_size * seq_len, d_model}, X.options());
+    auto K_all = torch::empty({batch_size * seq_len, d_model}, X.options());
+    auto V_all = torch::empty({batch_size * seq_len, d_model}, X.options());
+
+    single_attention_matrix_mul_gemm_2d(X_flattened, Wq, Q_all);
+    single_attention_matrix_mul_gemm_2d(X_flattened, Wk, K_all);
+    single_attention_matrix_mul_gemm_2d(X_flattened, Wv, V_all);
+
+    auto Q = Q_all.view({batch_size, seq_len, num_heads, head_dim}).permute({0,2,1,3}).contiguous();
+    auto K = K_all.view({batch_size, seq_len, num_heads, head_dim}).permute({0,2,1,3}).contiguous();
+    auto V = V_all.view({batch_size, seq_len, num_heads, head_dim}).permute({0,2,1,3}).contiguous();
+
+    auto scores = torch::empty({batch_size, num_heads, seq_len, seq_len}, X.options());
+    multi_head_attention_matrix_mul_gemm_batched(Q, K.transpose(-2, -1).contiguous(), scores, batch_size * num_heads);
+    scores /= std::sqrt((float)head_dim);
+    auto weights = torch::softmax(scores, -1);
+
+    auto output = torch::empty({batch_size, num_heads, seq_len, head_dim}, X.options());
+    multi_head_attention_matrix_mul_gemm_batched(weights, V, output, batch_size * num_heads);
+
+    ctx->save_for_backward({X, Wq, Wk, Wv, Q, K, V, weights});
+    return output.permute({0,2,1,3}).contiguous().view({batch_size, seq_len, d_model});
+}
+
+torch::autograd::tensor_list MultiHeadAttention::backward(
+    torch::autograd::AutogradContext *ctx, 
+    torch::autograd::tensor_list grad_outputs
+) 
+{
+    auto dOutput = grad_outputs[0];
+    auto forward_pass_vars = ctx->get_saved_variables();
+    auto X = forward_pass_vars[0];
+    auto Wq = forward_pass_vars[1];
+    auto Wk = forward_pass_vars[2];
+    auto Wv = forward_pass_vars[3];
+    auto Q = forward_pass_vars[4];
+    auto K = forward_pass_vars[5];
+    auto V = forward_pass_vars[6];
+    auto weights = forward_pass_vars[7];
+
+    int batch_size = X.size(0);
+    int seq_len = X.size(1);
+    int d_model = Wq.size(0);
+    int num_heads = Q.size(1);
+    int head_dim = d_model / num_heads;
+
+    auto Q_flat = Q.view({batch_size * num_heads, seq_len, head_dim});
+    auto K_flat = K.view({batch_size * num_heads, seq_len, head_dim});
+    auto V_flat = V.view({batch_size * num_heads, seq_len, head_dim});
+    auto weights_flat = weights.view({batch_size * num_heads, seq_len, seq_len});
+    auto dOutput_flat = dOutput.view({batch_size * num_heads, seq_len, head_dim});
+
+    auto dX  = torch::empty_like(X);
+    auto dWq = torch::empty_like(Wq);
+    auto dWk = torch::empty_like(Wk);
+    auto dWv = torch::empty_like(Wv);
+
+    // dV = W^T * dOutput
+    // dWeights = dOutput * V^T
+    // dScores = torch::softmax_backward(dWeights, weights).
+    // dQ = dScores * K
+    // dK = dScores ^ T * Q
+    // dX = dQ * Wq^T + dk * Wk^T + dV * Wv^T
+    // dWq = X^T * dQ
+    // dWk = X^T * dK
+    // dWv = X^T * dV
+
+    auto dV = torch::empty_like(V_flat);
+    multi_head_attention_matrix_mul_gemm_batched(weights.transpose(1,2).contiguous(), dOutput_flat, dV, batch_size*num_heads);
+    auto dWeights = torch::empty_like(weights_flat);
+    multi_head_attention_matrix_mul_gemm_batched(dOutput, V_flat.transpose(1,2).contiguous(), dWeights, batch_size*num_heads);
+    auto dScores = torch::_softmax_backward_data(dWeights, weights_flat, -1, dWeights.scalar_type());
+    auto dQ = torch::empty_like(Q_flat);
+    multi_head_attention_matrix_mul_gemm_batched(dScores, K_flat, dQ, batch_size*num_heads);
+    auto dK = torch::empty_like(K_flat);
+    multi_head_attention_matrix_mul_gemm_batched(dScores.transpose(0,1), Q_flat, dK, batch_size*num_heads);
+
+    auto X_flat = X.view({batch_size * seq_len, d_model});
+
+    auto dQ_merge = dQ.view({batch_size * seq_len, d_model});
+    auto dK_merge = dK.view({batch_size * seq_len, d_model});
+    auto dV_merge = dV.view({batch_size * seq_len, d_model});
+
+    auto dX_q = torch::empty_like(X_flat);
+    auto dX_k = torch::empty_like(X_flat);
+    auto dX_v = torch::empty_like(X_flat);
+
+    single_attention_matrix_mul_gemm_2d(dQ_merge, Wq.transpose(0,1), dX_q);
+    single_attention_matrix_mul_gemm_2d(dK_merge, Wk.transpose(0,1), dX_k);
+    single_attention_matrix_mul_gemm_2d(dV_merge, Wv.transpose(0,1), dX_v);
+
+    dX.copy_(dX_q).add_(dX_k).add_(dX_v);
+
+    single_attention_matrix_mul_gemm_2d(X_flat.transpose(0,1), dQ_merge, dWq);
+    single_attention_matrix_mul_gemm_2d(X_flat.transpose(0,1), dK_merge, dWk);
+    single_attention_matrix_mul_gemm_2d(X_flat.transpose(0,1), dV_merge, dWv);
+
+    return {dX.view_as(X), dWq, dWk, dWv, torch::Tensor()};
+}
 
 // Activation Functions
