@@ -232,7 +232,7 @@ torch::Tensor MultiHeadAttention::forward(
     auto final_result = torch::empty_like(concatenated);
     gemm_2d(concatenated, Wo, final_result);
 
-    ctx->save_for_backward({X, Wq, Wk, Wv, Q, K, V, weights});
+    ctx->save_for_backward({X, Wq, Wk, Wv, Wo, Q, K, V, weights, concatenated});
     return final_result.view({batch_size, seq_len, d_model});
 }
 
@@ -241,16 +241,18 @@ torch::autograd::tensor_list MultiHeadAttention::backward(
     torch::autograd::tensor_list grad_outputs
 ) 
 {
-    auto dOutput = grad_outputs[0];
+    auto dFinal_result = grad_outputs[0];
     auto forward_pass_vars = ctx->get_saved_variables();
     auto X = forward_pass_vars[0];
     auto Wq = forward_pass_vars[1];
     auto Wk = forward_pass_vars[2];
     auto Wv = forward_pass_vars[3];
-    auto Q = forward_pass_vars[4];
-    auto K = forward_pass_vars[5];
-    auto V = forward_pass_vars[6];
-    auto weights = forward_pass_vars[7];
+    auto Wo  = forward_pass_vars[4];
+    auto Q   = forward_pass_vars[5];
+    auto K   = forward_pass_vars[6];
+    auto V   = forward_pass_vars[7];
+    auto weights = forward_pass_vars[8];
+    auto concatenated  = forward_pass_vars[9];
 
     int batch_size = X.size(0);
     int seq_len = X.size(1);
@@ -258,11 +260,20 @@ torch::autograd::tensor_list MultiHeadAttention::backward(
     int num_heads = Q.size(1);
     int head_dim = d_model / num_heads;
 
+    auto dFinal_result_flat = dFinal_result.view({batch_size * seq_len, d_model});
+    auto concatenated_flat = concatenated.view({batch_size * seq_len, d_model});
+    auto dWo = torch::empty_like(Wo);
+    auto dConcatenated = torch::empty_like(concatenated);
+    gemm_2d(concatenated_flat.transpose(0,1).contiguous(), dFinal_result_flat, dWo);
+    gemm_2d(dFinal_result_flat, Wo.transpose(0,1).contiguous(), dConcatenated);
+    auto dConcatenated_heads = dConcatenated.view({batch_size, seq_len, num_heads, head_dim}).permute({0,2,1,3}).contiguous();
+
+
     auto Q_flat = Q.view({batch_size * num_heads, seq_len, head_dim});
     auto K_flat = K.view({batch_size * num_heads, seq_len, head_dim});
     auto V_flat = V.view({batch_size * num_heads, seq_len, head_dim});
     auto weights_flat = weights.view({batch_size * num_heads, seq_len, seq_len});
-    auto dOutput_flat = dOutput.view({batch_size * num_heads, seq_len, head_dim});
+    auto dOutput_flat = dConcatenated_heads.view({batch_size * num_heads, seq_len, head_dim});
 
     auto dX  = torch::empty_like(X);
     auto dWq = torch::empty_like(Wq);
@@ -282,12 +293,12 @@ torch::autograd::tensor_list MultiHeadAttention::backward(
     auto dV = torch::empty_like(V_flat);
     gemm_batched(weights.transpose(1,2).contiguous(), dOutput_flat, dV, batch_size*num_heads);
     auto dWeights = torch::empty_like(weights_flat);
-    gemm_batched(dOutput, V_flat.transpose(1,2).contiguous(), dWeights, batch_size*num_heads);
+    gemm_batched(dOutput_flat, V_flat.transpose(1,2).contiguous(), dWeights, batch_size*num_heads);
     auto dScores = torch::_softmax_backward_data(dWeights, weights_flat, -1, dWeights.scalar_type());
     auto dQ = torch::empty_like(Q_flat);
     gemm_batched(dScores, K_flat, dQ, batch_size*num_heads);
     auto dK = torch::empty_like(K_flat);
-    gemm_batched(dScores.transpose(0,1), Q_flat, dK, batch_size*num_heads);
+    gemm_batched(dScores.transpose(1,2).contiguous(), Q_flat, dK, batch_size*num_heads);
 
     auto X_flat = X.view({batch_size * seq_len, d_model});
 
@@ -299,17 +310,17 @@ torch::autograd::tensor_list MultiHeadAttention::backward(
     auto dX_k = torch::empty_like(X_flat);
     auto dX_v = torch::empty_like(X_flat);
 
-    gemm_2d(dQ_merge, Wq.transpose(0,1), dX_q);
-    gemm_2d(dK_merge, Wk.transpose(0,1), dX_k);
-    gemm_2d(dV_merge, Wv.transpose(0,1), dX_v);
+    gemm_2d(dQ_merge, Wq.transpose(0,1).contiguous(), dX_q);
+    gemm_2d(dK_merge, Wk.transpose(0,1).contiguous(), dX_k);
+    gemm_2d(dV_merge, Wv.transpose(0,1).contiguous(), dX_v);
 
     dX.copy_(dX_q).add_(dX_k).add_(dX_v);
 
-    gemm_2d(X_flat.transpose(0,1), dQ_merge, dWq);
-    gemm_2d(X_flat.transpose(0,1), dK_merge, dWk);
-    gemm_2d(X_flat.transpose(0,1), dV_merge, dWv);
+    gemm_2d(X_flat.transpose(0,1).contiguous(), dQ_merge, dWq);
+    gemm_2d(X_flat.transpose(0,1).contiguous(), dK_merge, dWk);
+    gemm_2d(X_flat.transpose(0,1).contiguous(), dV_merge, dWv);
 
-    return {dX.view_as(X), dWq, dWk, dWv, torch::Tensor()};
+    return {dX.view_as(X), dWq, dWk, dWv, dWo, torch::Tensor()};
 }
 
 // MLP
