@@ -229,9 +229,11 @@ torch::Tensor MultiHeadAttention::forward(
     gemm_batched(weights, V, output, batch_size * num_heads);
 
     auto concatenated = output.permute({0,2,1,3}).contiguous().view({batch_size, seq_len, d_model});
-    auto final_result = torch::empty_like(concatenated);
-    gemm_2d(concatenated, Wo, final_result);
+    auto concatenated_2d = concatenated.view({batch_size * seq_len, d_model});
+    auto final_result_2d = torch::empty_like(concatenated_2d);
+    gemm_2d(concatenated_2d, Wo, final_result_2d);
 
+    auto final_result = final_result_2d.view({batch_size, seq_len, d_model});
     ctx->save_for_backward({X, Wq, Wk, Wv, Wo, Q, K, V, weights, concatenated});
     return final_result.view({batch_size, seq_len, d_model});
 }
