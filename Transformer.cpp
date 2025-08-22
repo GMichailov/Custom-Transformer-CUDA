@@ -197,6 +197,7 @@ torch::Tensor MultiHeadAttention::forward(
     torch::Tensor Wq,
     torch::Tensor Wk,
     torch::Tensor Wv,
+    torch::Tensor Wo,
     int num_heads
 )
 {
@@ -227,8 +228,12 @@ torch::Tensor MultiHeadAttention::forward(
     auto output = torch::empty({batch_size, num_heads, seq_len, head_dim}, X.options());
     gemm_batched(weights, V, output, batch_size * num_heads);
 
+    auto concatenated = output.permute({0,2,1,3}).contiguous().view({batch_size, seq_len, d_model});
+    auto final_result = torch::empty_like(concatenated);
+    gemm_2d(concatenated, Wo, final_result);
+
     ctx->save_for_backward({X, Wq, Wk, Wv, Q, K, V, weights});
-    return output.permute({0,2,1,3}).contiguous().view({batch_size, seq_len, d_model});
+    return final_result.view({batch_size, seq_len, d_model});
 }
 
 torch::autograd::tensor_list MultiHeadAttention::backward(

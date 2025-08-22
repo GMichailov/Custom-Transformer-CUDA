@@ -40,6 +40,7 @@ struct MultiHeadAttention : public torch::autograd::Function<MultiHeadAttention>
         torch::Tensor Wq,
         torch::Tensor Wk,
         torch::Tensor Wv,
+        torch::Tensor Wo,
         int num_heads
     );
     static torch::autograd::tensor_list backward(
