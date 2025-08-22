@@ -307,4 +307,45 @@ torch::autograd::tensor_list MultiHeadAttention::backward(
     return {dX.view_as(X), dWq, dWk, dWv, torch::Tensor()};
 }
 
+// MLP
+
+torch::Tensor Linear::forward(
+    torch::autograd::AutogradContext *ctx,
+    torch::Tensor X,
+    torch::Tensor W,
+    torch::Tensor b
+)
+{
+    auto prebias_output = torch::empty({X.size(0), W.size(1)}, X.options());
+    single_attention_matrix_mul_gemm_2d(X, W, prebias_output);
+    auto output = prebias_output + b;
+    ctx->save_for_backward({X, W, b});
+    return output;
+}
+
+torch::autograd::tensor_list Linear::backward(
+    torch::autograd::AutogradContext *ctx, 
+    torch::autograd::tensor_list grad_outputs
+)
+{
+    auto dOutput = grad_outputs[0];
+    auto forward_pass_vars = ctx->get_saved_variables();
+    auto X = forward_pass_vars[0];
+    auto W = forward_pass_vars[1];
+    auto b = forward_pass_vars[2];
+
+    // dX = dOutput * W^T
+    // dW = X^T * dOutput
+    // db = sum(dOutput) across dim 0
+
+    auto dX = torch::empty_like(X);
+    auto dW = torch::empty_like(W);
+    auto db = torch::empty_like(b);
+
+    single_attention_matrix_mul_gemm_2d(dOutput, W.transpose(0,1).contiguous(), dX);
+    single_attention_matrix_mul_gemm_2d(X.transpose(0,1).contiguous(), dOutput, dW);
+    db = dOutput.sum(0);
+    return {dX, dW, db};
+}
+
 // Activation Functions
