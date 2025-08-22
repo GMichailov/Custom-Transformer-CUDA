@@ -4,7 +4,7 @@ cublasHandle_t handle;
 
 // Calculation Functions
 
-void single_attention_matrix_mul_gemm_2d(
+void gemm_2d(
     const torch::Tensor& src_a,
     const torch::Tensor& src_b,
     torch::Tensor& dest
@@ -38,7 +38,7 @@ void single_attention_matrix_mul_gemm_2d(
     dest.copy_(_dest);
 }
 
-void multi_head_attention_matrix_mul_gemm_batched(
+void gemm_batched(
     const torch::Tensor& src_a,
     const torch::Tensor& src_b,
     torch::Tensor& dest,
@@ -100,17 +100,17 @@ torch::Tensor SingleHeadAttention::forward(
     auto K = torch::empty({batch_size * seq_len, d_model}, X.options());
     auto V = torch::empty({batch_size * seq_len, d_model}, X.options());
 
-    single_attention_matrix_mul_gemm_2d(X_flattened, Wq, Q);
-    single_attention_matrix_mul_gemm_2d(X_flattened, Wk, K);
-    single_attention_matrix_mul_gemm_2d(X_flattened, Wv, V);
+    gemm_2d(X_flattened, Wq, Q);
+    gemm_2d(X_flattened, Wk, K);
+    gemm_2d(X_flattened, Wv, V);
 
     // softmax(QK^T / sqrt(D)) * V
     auto scores = torch::empty({batch_size * seq_len, batch_size * seq_len}, X.options());
-    single_attention_matrix_mul_gemm_2d(Q, K.transpose(0, 1).contiguous(), scores);
+    gemm_2d(Q, K.transpose(0, 1).contiguous(), scores);
     scores /= std::sqrt((float)d_model);
     auto weights = torch::softmax(scores, -1);
     auto output = torch::empty({batch_size * seq_len, d_model}, X.options());
-    single_attention_matrix_mul_gemm_2d(weights, V, output);
+    gemm_2d(weights, V, output);
 
     // For now, save everything, can do recomputes later when I have time.
     ctx->save_for_backward({X, Wq, Wk, Wv, Q, K, V, weights});
@@ -165,28 +165,28 @@ torch::autograd::tensor_list SingleHeadAttention::backward(
     // dWv = X^T * dV
 
     auto dV = torch::empty_like(V_flat);
-    single_attention_matrix_mul_gemm_2d(weights.transpose(0,1).contiguous(), dOutput_flat, dV);
+    gemm_2d(weights.transpose(0,1).contiguous(), dOutput_flat, dV);
     auto dWeights = torch::empty_like(weights_flat);
-    single_attention_matrix_mul_gemm_2d(dOutput, V_flat.transpose(0,1).contiguous(), dWeights);
+    gemm_2d(dOutput, V_flat.transpose(0,1).contiguous(), dWeights);
     auto dScores = torch::_softmax_backward_data(dWeights, weights_flat, -1, dWeights.scalar_type());
     auto dQ = torch::empty_like(Q_flat);
-    single_attention_matrix_mul_gemm_2d(dScores, K_flat, dQ);
+    gemm_2d(dScores, K_flat, dQ);
     auto dK = torch::empty_like(K_flat);
-    single_attention_matrix_mul_gemm_2d(dScores.transpose(0,1), Q_flat, dK);
+    gemm_2d(dScores.transpose(0,1), Q_flat, dK);
 
     auto dX_q = torch::empty_like(X_flat);
     auto dX_k = torch::empty_like(X_flat);
     auto dX_v = torch::empty_like(X_flat);
 
-    single_attention_matrix_mul_gemm_2d(dQ, Wq.transpose(0,1), dX_q);
-    single_attention_matrix_mul_gemm_2d(dK, Wk.transpose(0,1), dX_k);
-    single_attention_matrix_mul_gemm_2d(dV, Wv.transpose(0,1), dX_v);
+    gemm_2d(dQ, Wq.transpose(0,1), dX_q);
+    gemm_2d(dK, Wk.transpose(0,1), dX_k);
+    gemm_2d(dV, Wv.transpose(0,1), dX_v);
 
     dX.copy_(dX_q).add_(dX_k).add_(dX_v);
 
-    single_attention_matrix_mul_gemm_2d(X_flat.transpose(0,1), dQ, dWq);
-    single_attention_matrix_mul_gemm_2d(X_flat.transpose(0,1), dK, dWk);
-    single_attention_matrix_mul_gemm_2d(X_flat.transpose(0,1), dV, dWv);
+    gemm_2d(X_flat.transpose(0,1), dQ, dWq);
+    gemm_2d(X_flat.transpose(0,1), dK, dWk);
+    gemm_2d(X_flat.transpose(0,1), dV, dWv);
 
     return {dX.view_as(X), dWq, dWk, dWv};
 }
@@ -211,21 +211,21 @@ torch::Tensor MultiHeadAttention::forward(
     auto K_all = torch::empty({batch_size * seq_len, d_model}, X.options());
     auto V_all = torch::empty({batch_size * seq_len, d_model}, X.options());
 
-    single_attention_matrix_mul_gemm_2d(X_flattened, Wq, Q_all);
-    single_attention_matrix_mul_gemm_2d(X_flattened, Wk, K_all);
-    single_attention_matrix_mul_gemm_2d(X_flattened, Wv, V_all);
+    gemm_2d(X_flattened, Wq, Q_all);
+    gemm_2d(X_flattened, Wk, K_all);
+    gemm_2d(X_flattened, Wv, V_all);
 
     auto Q = Q_all.view({batch_size, seq_len, num_heads, head_dim}).permute({0,2,1,3}).contiguous();
     auto K = K_all.view({batch_size, seq_len, num_heads, head_dim}).permute({0,2,1,3}).contiguous();
     auto V = V_all.view({batch_size, seq_len, num_heads, head_dim}).permute({0,2,1,3}).contiguous();
 
     auto scores = torch::empty({batch_size, num_heads, seq_len, seq_len}, X.options());
-    multi_head_attention_matrix_mul_gemm_batched(Q, K.transpose(-2, -1).contiguous(), scores, batch_size * num_heads);
+    gemm_batched(Q, K.transpose(-2, -1).contiguous(), scores, batch_size * num_heads);
     scores /= std::sqrt((float)head_dim);
     auto weights = torch::softmax(scores, -1);
 
     auto output = torch::empty({batch_size, num_heads, seq_len, head_dim}, X.options());
-    multi_head_attention_matrix_mul_gemm_batched(weights, V, output, batch_size * num_heads);
+    gemm_batched(weights, V, output, batch_size * num_heads);
 
     ctx->save_for_backward({X, Wq, Wk, Wv, Q, K, V, weights});
     return output.permute({0,2,1,3}).contiguous().view({batch_size, seq_len, d_model});
@@ -275,14 +275,14 @@ torch::autograd::tensor_list MultiHeadAttention::backward(
     // dWv = X^T * dV
 
     auto dV = torch::empty_like(V_flat);
-    multi_head_attention_matrix_mul_gemm_batched(weights.transpose(1,2).contiguous(), dOutput_flat, dV, batch_size*num_heads);
+    gemm_batched(weights.transpose(1,2).contiguous(), dOutput_flat, dV, batch_size*num_heads);
     auto dWeights = torch::empty_like(weights_flat);
-    multi_head_attention_matrix_mul_gemm_batched(dOutput, V_flat.transpose(1,2).contiguous(), dWeights, batch_size*num_heads);
+    gemm_batched(dOutput, V_flat.transpose(1,2).contiguous(), dWeights, batch_size*num_heads);
     auto dScores = torch::_softmax_backward_data(dWeights, weights_flat, -1, dWeights.scalar_type());
     auto dQ = torch::empty_like(Q_flat);
-    multi_head_attention_matrix_mul_gemm_batched(dScores, K_flat, dQ, batch_size*num_heads);
+    gemm_batched(dScores, K_flat, dQ, batch_size*num_heads);
     auto dK = torch::empty_like(K_flat);
-    multi_head_attention_matrix_mul_gemm_batched(dScores.transpose(0,1), Q_flat, dK, batch_size*num_heads);
+    gemm_batched(dScores.transpose(0,1), Q_flat, dK, batch_size*num_heads);
 
     auto X_flat = X.view({batch_size * seq_len, d_model});
 
@@ -294,15 +294,15 @@ torch::autograd::tensor_list MultiHeadAttention::backward(
     auto dX_k = torch::empty_like(X_flat);
     auto dX_v = torch::empty_like(X_flat);
 
-    single_attention_matrix_mul_gemm_2d(dQ_merge, Wq.transpose(0,1), dX_q);
-    single_attention_matrix_mul_gemm_2d(dK_merge, Wk.transpose(0,1), dX_k);
-    single_attention_matrix_mul_gemm_2d(dV_merge, Wv.transpose(0,1), dX_v);
+    gemm_2d(dQ_merge, Wq.transpose(0,1), dX_q);
+    gemm_2d(dK_merge, Wk.transpose(0,1), dX_k);
+    gemm_2d(dV_merge, Wv.transpose(0,1), dX_v);
 
     dX.copy_(dX_q).add_(dX_k).add_(dX_v);
 
-    single_attention_matrix_mul_gemm_2d(X_flat.transpose(0,1), dQ_merge, dWq);
-    single_attention_matrix_mul_gemm_2d(X_flat.transpose(0,1), dK_merge, dWk);
-    single_attention_matrix_mul_gemm_2d(X_flat.transpose(0,1), dV_merge, dWv);
+    gemm_2d(X_flat.transpose(0,1), dQ_merge, dWq);
+    gemm_2d(X_flat.transpose(0,1), dK_merge, dWk);
+    gemm_2d(X_flat.transpose(0,1), dV_merge, dWv);
 
     return {dX.view_as(X), dWq, dWk, dWv, torch::Tensor()};
 }
@@ -317,7 +317,7 @@ torch::Tensor Linear::forward(
 )
 {
     auto prebias_output = torch::empty({X.size(0), W.size(1)}, X.options());
-    single_attention_matrix_mul_gemm_2d(X, W, prebias_output);
+    gemm_2d(X, W, prebias_output);
     auto output = prebias_output + b;
     ctx->save_for_backward({X, W, b});
     return output;
@@ -342,8 +342,8 @@ torch::autograd::tensor_list Linear::backward(
     auto dW = torch::empty_like(W);
     auto db = torch::empty_like(b);
 
-    single_attention_matrix_mul_gemm_2d(dOutput, W.transpose(0,1).contiguous(), dX);
-    single_attention_matrix_mul_gemm_2d(X.transpose(0,1).contiguous(), dOutput, dW);
+    gemm_2d(dOutput, W.transpose(0,1).contiguous(), dX);
+    gemm_2d(X.transpose(0,1).contiguous(), dOutput, dW);
     db = dOutput.sum(0);
     return {dX, dW, db};
 }
