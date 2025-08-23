@@ -78,6 +78,24 @@ void gemm_batched(
 
 // Positional Encoders
 
+torch::Tensor PatchPositionalEmbedding::forward(
+    torch::autograd::AutogradContext *ctx,
+    torch::Tensor X,
+    torch::Tensor PositionalEmbeddings
+)
+{
+    return X + PositionalEmbeddings;
+}
+
+torch::autograd::tensor_list backward(
+    torch::autograd::AutogradContext *ctx,
+    torch::autograd::tensor_list grad_outputs
+)
+{
+    auto dOutput = grad_outputs[0];
+    return {dOutput.clone(), dOutput.clone()};    
+}
+
 // Attention
 
 torch::Tensor SingleHeadAttention::forward(
