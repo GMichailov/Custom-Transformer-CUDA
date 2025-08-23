@@ -334,9 +334,14 @@ torch::Tensor Linear::forward(
     torch::Tensor b
 )
 {
-    auto prebias_output = torch::empty({X.size(0), W.size(1)}, X.options());
-    gemm_2d(X, W, prebias_output);
-    auto output = prebias_output + b;
+    int batch_size = X.size(0);
+    int seq_len = X.size(1);
+    int fan_in = W.size(0);
+    int fan_out = W.size(1);
+
+    auto output = torch::empty({batch_size, seq_len, fan_out}, X.options());
+    gemm_batched(X, W.unsqueeze(0).expand({batch_size, fan_in, fan_out}), output, batch_size);
+    output = output + b;
     ctx->save_for_backward({X, W, b});
     return output;
 }
@@ -352,18 +357,22 @@ torch::autograd::tensor_list Linear::backward(
     auto W = forward_pass_vars[1];
     auto b = forward_pass_vars[2];
 
+    int batch_size = X.size(0);
+    int seq_len = X.size(1);
+    int fan_in = W.size(0);
+    int fan_out = W.size(1);
+
     // dX = dOutput * W^T
     // dW = X^T * dOutput
     // db = sum(dOutput) across dim 0
 
-    auto dX = torch::empty_like(X);
+    auto X_2d    = X.reshape({batch_size*seq_len, fan_in});
+    auto dOut_2d = dOutput.reshape({batch_size*seq_len, fan_out});
+    auto dX_2d = torch::empty({batch_size*seq_len, fan_in}, X.options());
+    gemm_2d(dOut_2d, W.transpose(0,1).contiguous(), dX_2d);
+    auto dX = dX_2d.reshape_as(X);
     auto dW = torch::empty_like(W);
-    auto db = torch::empty_like(b);
-
-    gemm_2d(dOutput, W.transpose(0,1).contiguous(), dX);
-    gemm_2d(X.transpose(0,1).contiguous(), dOutput, dW);
-    db = dOutput.sum(0);
+    gemm_2d(X_2d.transpose(0,1).contiguous(), dOut_2d, dW);
+    auto db = dOutput.sum(at::IntArrayRef{0,1});
     return {dX, dW, db};
 }
-
-// Activation Functions

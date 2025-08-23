@@ -65,12 +65,3 @@ struct Linear : public torch::autograd::Function<Linear> {
 };
 
 // Activation Funtions
-
-struct SwiGlu : public torch::autograd::Function<SwiGlu> {
-    static torch::Tensor forward(
-        torch::autograd::AutogradContext *ctx
-    );
-    static torch::autograd::tensor_list backward(
-        torch::autograd::AutogradContext *ctx
-    );
-};

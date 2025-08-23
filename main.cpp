@@ -67,13 +67,45 @@ void logging_gradcheck_multihead() {
     std::cout << "Grad Wo:\n" << Wo.grad().cpu() << "\n";
 }
 
+void logging_gradcheck_linear() {
+    int batch_size = 2;
+    int seq_len    = 3;
+    int d_in       = 4;
+    int d_out      = 5;
+
+    std::cout << "Creating X, W, b for Linear layer.\n";
+
+    auto opts = torch::dtype(torch::kFloat32).device(torch::kCUDA).requires_grad(true);
+
+    auto X = torch::randn({batch_size, seq_len, d_in}, opts);
+    auto W = torch::randn({d_in, d_out}, opts);
+    auto b = torch::randn({d_out}, opts);
+
+    std::cout << "Input X:\n" << X.cpu() << "\n";
+    std::cout << "Weight W:\n" << W.cpu() << "\n";
+    std::cout << "Bias b:\n" << b.cpu() << "\n";
+
+    // Forward
+    auto output = Linear::apply(X, W, b);
+    std::cout << "Output:\n" << output.cpu() << "\n";
+
+    // Backward
+    output.backward(torch::ones_like(output));
+
+    std::cout << "\n--- Gradients ---\n";
+    std::cout << "Grad X:\n" << X.grad().cpu() << "\n";
+    std::cout << "Grad W:\n" << W.grad().cpu() << "\n";
+    std::cout << "Grad b:\n" << b.grad().cpu() << "\n";
+}
+
+
 int main() {
     if (cublasCreate(&handle) != CUBLAS_STATUS_SUCCESS) {
         std::cerr << "Failed to create cuBLAS handle!" << std::endl;
         return -1;
     }
 
-    logging_gradcheck_multihead();
+    logging_gradcheck_linear();
 
     cublasDestroy(handle);
     return 0;
