@@ -5,7 +5,7 @@ namespace ember {
 namespace Operations {
 
 template <typename scalar_t>
-inline void QkvFusedProjection(
+inline void QkvFlatFusedProjection(
     const scalar_t* X, const scalar_t* W_qkv_all,
     scalar_t* QKV,
     int batch_size, int seq_len, int d_model, int num_heads, int d_head
@@ -21,8 +21,11 @@ inline void QkvFusedProjection(
     );
 }
 
+
+
+
 template <typename scalar_t>
-inline void QkvFusedProjectionBias(
+inline void QkvFlatFusedProjectionBias(
     const scalar_t* X, const scalar_t* W_qkv_all, const scalar_t* bias_qkv_all,
     scalar_t* QKV,
     int batch_size, int seq_len, int d_model, int num_heads, int d_head
@@ -39,6 +42,8 @@ inline void QkvFusedProjectionBias(
 }
 
 
+
+
 template <typename scalar_t>
 inline void AttentionScores(
     const scalar_t* Q, const scalar_t* K,
@@ -50,16 +55,20 @@ inline void AttentionScores(
     int shared_dim = d_head;
     int cols = seq_len;
 
-    ember::Gemm::matmul<scalar_t>(
+    ember::Gemm::matmul_strided_batch<scalar_t>(
         Q, K,
         scores,
-        batch_size,
+        batch_size * num_heads,
         rows, cols, shared_dim,
         false, true,
         static_cast<scalar_t>(1.0 / std::sqrt((float)d_head)),
         static_cast<scalar_t>(0.0)
     );
 }
+
+
+
+
 
 template <typename scalar_t>
 inline void AttentionWeightedValues(
