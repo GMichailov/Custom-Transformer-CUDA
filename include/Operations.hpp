@@ -65,7 +65,15 @@ inline void AttentionScores(
 
 
 
-
+/*
+ * Computes attention-weighted values.
+ *
+ * Expects:
+ * softmaxScores: [batch_size, num_heads, seq_len, seq_len]
+ * V: [batch_size, num_heads, seq_len, d_head]
+ * context : [batch_size, num_heads, seq_len, d_head]
+ *
+ */
 template <typename scalar_t>
 inline void AttentionWeightedValues(
     const scalar_t* softmaxScores, const scalar_t* V,
@@ -73,10 +81,22 @@ inline void AttentionWeightedValues(
     int batch_size, int num_heads, int seq_len, int d_head
 );
 
+
+
+
+/*
+ * Final output projection after multi-head attention.
+ *
+ * Expects:
+ * context : [batch_size, num_heads, seq_len, d_head]
+ * Wo : [num_heads * d_head, d_model]
+ * outputProjection : [batch_size, seq_len, d_model]
+ *
+ */
 template <typename scalar_t>
 inline void OutputProjection(
-    const scalar_t* attentionOutput, const scalar_t* Wo,
-    scalar_t* blockOutput,
+    const scalar_t* context, const scalar_t* Wo,
+    scalar_t* outputProjection,
     int batch_size, int seq_len, int d_model, int num_heads, int d_head
 );
 

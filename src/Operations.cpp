@@ -69,7 +69,6 @@ inline void AttentionScores(
 
 
 
-
 template <typename scalar_t>
 inline void AttentionWeightedValues(
     const scalar_t* softmaxScores, const scalar_t* V,
@@ -89,10 +88,13 @@ inline void AttentionWeightedValues(
     );
 }
 
+
+
+
 template <typename scalar_t>
 inline void OutputProjection(
-    const scalar_t* attentionOutput, const scalar_t* Wo,
-    scalar_t* blockOutput,
+    const scalar_t* context, const scalar_t* Wo,
+    scalar_t* outputProjection,
     int batch_size, int seq_len, int d_model, int num_heads, int d_head
 )
 {
@@ -101,7 +103,7 @@ inline void OutputProjection(
     int cols = d_model;
 
     ember::Gemm::matmul<scalar_t>(
-        attentionOutput, Wo, blockOutput,
+        context, Wo, outputProjection,
         batch_size * num_heads,
         rows, cols, shared_dim
     );
