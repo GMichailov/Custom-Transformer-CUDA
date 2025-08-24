@@ -104,14 +104,16 @@ inline void OutputProjection(
 
     ember::Gemm::matmul<scalar_t>(
         context, Wo, outputProjection,
-        batch_size * num_heads,
         rows, cols, shared_dim
     );
 }
 
+
+
+
 template <typename scalar_t>
 inline void OutputProjectionBias(
-    const scalar_t* attentionOutput, const scalar_t* Wo, const scalar_t* bias,
+    const scalar_t* attentionOutput, const scalar_t* Wo, const scalar_t* bo,
     scalar_t* blockOutput,
     int batch_size, int seq_len, int d_model, int num_heads, int d_head
 )
@@ -121,7 +123,7 @@ inline void OutputProjectionBias(
     int cols = d_model;
 
     ember::Gemm::matmul_bias<scalar_t>(
-        attentionOutput, Wo, bias, blockOutput,
+        attentionOutput, Wo, bo, blockOutput,
         rows, cols, shared_dim
     );
 }

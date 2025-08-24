@@ -100,9 +100,23 @@ inline void OutputProjection(
     int batch_size, int seq_len, int d_model, int num_heads, int d_head
 );
 
+
+
+
+
+/*
+ * Final output projection after multi-head attention.
+ *
+ * Expects:
+ * context : [batch_size, num_heads, seq_len, d_head]
+ * Wo : [num_heads * d_head, d_model]
+ * bo : [d_model]
+ * outputProjection : [batch_size, seq_len, d_model]
+ *
+ */
 template <typename scalar_t>
 inline void OutputProjectionBias(
-    const scalar_t* attentionOutput, const scalar_t* Wo, const scalar_t* bias,
+    const scalar_t* attentionOutput, const scalar_t* Wo, const scalar_t* bo,
     scalar_t* blockOutput,
     int batch_size, int seq_len, int d_model, int head, int d_head
 );
