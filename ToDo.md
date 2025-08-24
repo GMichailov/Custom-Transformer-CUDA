@@ -11,8 +11,7 @@
 
 Standing Out: Focus on smaller nets rather than massive ones
 - Computation Speed Up Mode (For Inference)
-    - Fuse entire attention layers into a single kernel (multihead attention + MLP + norm).
-    - FlashAttention
+    - Fuse entire attention layers into a single kernel (multihead attention + MLP + norm) (Flash attention)
     - Specialized kernel for real-time models that assumes 1 item and never batches
     - Multihead Latent Attention Compression.
     - Switch to CublasLt and make this work with mixed precision.
