@@ -131,6 +131,88 @@ inline void OutputProjectionBias(
 
 
 
+template <typename scalar_t>
+inline void FeedForwardLayerOne(
+    const scalar_t* X, const scalar_t* W,
+    scalar_t* output,
+    int batch_size, int seq_len, int d_model, int hidden_dim,
+    cublasLtEpilogue_t epilogue
+)
+{
+    int rows = batch_size * seq_len;
+    int shared_dim = d_model;
+    int cols = hidden_dim;
+
+    ember::Gemm::matmul_activation(
+        X, W,
+        output,
+        rows, cols, shared_dim,
+        epilogue
+    );
+}
+
+
+
+
+template <typename scalar_t>
+inline void FeedForwardLayerOneBias(
+    const scalar_t* X, const scalar_t* W, const scalar_t* b,
+    scalar_t* output,
+    int batch_size, int seq_len, int d_model, int hidden_dim,
+    cublasLtEpilogue_t epilogue
+)
+{
+    int rows = batch_size * seq_len;
+    int shared_dim = d_model;
+    int cols = hidden_dim;
+
+    ember::Gemm::matmul_bias_activation(
+        X, W, b,
+        output,
+        rows, cols, shared_dim,
+        epilogue
+    );
+}
+
+
+
+
+template <typename scalar_t>
+inline void FeedForwardLayerTwo(
+    const scalar_t* hidden, const scalar_t* W,
+    scalar_t* output,
+    int batch_size, int seq_len, int d_model, int hidden_dim
+)
+{
+    int rows = batch_size * seq_len;
+    int shared_dim = hidden_dim;
+    int cols = d_model;
+
+    ember::Gemm::matmul(
+        hidden, W, output,
+        rows, cols, shared_dim
+    );
+}
+
+
+
+
+template <typename scalar_t>
+inline void FeedForwardLayerTwoBias(
+    const scalar_t* hidden, const scalar_t* W, const scalar_t* b,
+    scalar_t* output,
+    int batch_size, int seq_len, int d_model, int hidden_dim
+)
+{
+    int rows = batch_size * seq_len;
+    int shared_dim = hidden_dim;
+    int cols = d_model;
+
+    ember::Gemm::matmul_bias(
+        hidden, W, b, output,
+        rows, cols, shared_dim
+    );
+}
 
 }
 }

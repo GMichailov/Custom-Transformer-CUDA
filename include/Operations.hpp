@@ -103,7 +103,6 @@ inline void OutputProjection(
 
 
 
-
 /*
  * Final output projection after multi-head attention.
  *
@@ -121,28 +120,86 @@ inline void OutputProjectionBias(
     int batch_size, int seq_len, int d_model, int head, int d_head
 );
 
+
+
+
+/*
+ * Linear layer calculation with an activation and without a bias.
+ *
+ * Expects:
+ * X : [batch_size, seq_len, d_model]
+ * W : [d_model, hidden_dim]
+ * epilogue : Epilogue for operation includes activation and no bias
+ * output : [batch_size, seq_len, hidden_dim]
+ *
+ */
 template <typename scalar_t>
-inline void FeedForwardActivation(
+inline void FeedForwardLayerOne(
     const scalar_t* X, const scalar_t* W,
-    scalar_t* output
+    scalar_t* output,
+    int batch_size, int seq_len, int d_model, int hidden_dim,
+    cublasLtEpilogue_t epilogue
 );
 
+
+
+
+/*
+ * Linear layer calculation with a bias and activation.
+ *
+ * Expects:
+ * X : [batch_size, seq_len, d_model]
+ * W : [d_model, hidden_dim]
+ * b: [hidden_dim]
+ * epilogue : Epilogue for operation includes activation and no bias
+ * output : [batch_size, seq_len, hidden_dim]
+ *
+ */
 template <typename scalar_t>
-inline void FeedForwardBiasActivation(
+inline void FeedForwardLayerOneBias(
     const scalar_t* X, const scalar_t* W, const scalar_t* b,
-    scalar_t* output
+    scalar_t* output,
+    int batch_size, int seq_len, int d_model, int hidden_dim,
+    cublasLtEpilogue_t epilogue
 );
 
+
+
+
+/*
+ * Second layer of the FFN without a bias and activation.
+ *
+ * Expects:
+ * hidden : [batch_size, seq_len, hidden_dim]
+ * W : [hidden_dim, d_model]
+ * output : [batch_size, seq_len, d_model]
+ *
+ */
 template <typename scalar_t>
-inline void FeedForwardNoActivation(
+inline void FeedForwardLayerTwo(
     const scalar_t* hidden, const scalar_t* W,
-    scalar_t* output
+    scalar_t* output,
+    int batch_size, int seq_len, int d_model, int hidden_dim
 );
 
+
+
+
+/*
+ * Second layer of the FFN with a bias and without an activation.
+ *
+ * Expects:
+ * hidden : [batch_size, seq_len, hidden_dim]
+ * W : [hidden_dim, d_model]
+ * b : [d_model]
+ * output : [batch_size, seq_len, d_model]
+ *
+ */
 template <typename scalar_t>
-inline void FeedForwardBiasNoActivation(
+inline void FeedForwardLayerTwoBias(
     const scalar_t* hidden, const scalar_t* W, const scalar_t* b,
-    scalar_t* output
+    scalar_t* output,
+    int batch_size, int seq_len, int d_model, int hidden_dim
 );
 
 // TODO Later: Import FlashAttention/Rewrite anything that uses python.h
