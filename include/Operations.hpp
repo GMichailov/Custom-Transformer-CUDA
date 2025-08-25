@@ -4,6 +4,10 @@
 namespace ember {
 namespace Operations {
 
+
+//=====================================Forward Pass Operations====================================================
+
+
 /*
  * Expects:
  * X : [batch_size, seq_len, d_model]

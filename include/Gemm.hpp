@@ -7,12 +7,6 @@ namespace Gemm {
 extern cublasLtHandle_t handle;
 extern cublasLtMatmulDesc_t matmul_desc;
 extern cublasLtMatrixLayout_t x_layout, W_qkv_layout, qkv_layout;
-cublasLtEpilogue_t relu = CUBLASLT_EPILOGUE_RELU;
-cublasLtEpilogue_t relu_bias = CUBLASLT_EPILOGUE_RELU_BIAS;
-cublasLtEpilogue_t relu = CUBLASLT_EPILOGUE_GELU;
-cublasLtEpilogue_t gelu_bias = CUBLASLT_EPILOGUE_GELU_BIAS;
-
-
 
 template <typename scalar_t>
 inline void matmul(
