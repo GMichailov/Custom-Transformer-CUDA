@@ -33,6 +33,8 @@ Standing Out: Focus on smaller nets rather than massive ones
 - Support causal for seq2seq tasks
 
 1. Write Gemm.cpp
+    1. Finish Gemm Functions.
+    2. Fix all functions that used strided batch to reflect new triple stride header.
 2. Write forward pass for multihead attention in Autograd.cpp
 3. Write out multihead attention backward pass to see what operations I need (training transformers have no backward pass)
 4. Write Operations and Gemms needed for backward pass.
