@@ -55,10 +55,15 @@ inline void AttentionScores(
     int shared_dim = d_head;
     int cols = seq_len;
 
+    long long int strideQ = static_cast<long long>(seq_len) * d_head;
+    long long int strideK = static_cast<long long>(seq_len) * d_head;
+    long long int strideScore = static_cast<long long>(seq_len) * seq_len;
+
     ember::Gemm::matmul_strided_batch<scalar_t>(
         Q, K,
         scores,
         batch_size * num_heads,
+        strideQ, strideK, strideScore,
         rows, cols, shared_dim,
         false, true,
         static_cast<scalar_t>(1.0 / std::sqrt((float)d_head)),
@@ -80,10 +85,15 @@ inline void AttentionWeightedValues(
     int shared_dim = seq_len;
     int cols = d_head;
 
+    long long strideScores = static_cast<long long>(seq_len) * seq_len;
+    long long strideV = static_cast<long long>(seq_len) * d_head;
+    long long strideContext = static_cast<long long>(seq_len) * d_head;
+
     ember::Gemm::matmul_strided_batch<scalar_t>(
         softmaxScores, V,
         context,
         batch_size * num_heads,
+        strideScores, strideV, strideContext, 
         rows, cols, shared_dim
     );
 }
