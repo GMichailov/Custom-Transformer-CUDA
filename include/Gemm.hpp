@@ -5,8 +5,8 @@ namespace ember {
 namespace Gemm {
 
 extern cublasLtHandle_t handle;
-extern cublasLtMatmulDesc_t matmul_desc;
-extern cublasLtMatrixLayout_t x_layout, W_qkv_layout, qkv_layout;
+extern cublasLtMatmulDesc_t desc_plain, desc_bias, desc_bias_relu, desc_bias_gelu;
+
 
 template <typename scalar_t>
 inline void matmul(
@@ -51,7 +51,6 @@ inline void matmul_activation(
     int rows, int cols, int shared_dim,
     cublasLtEpilogue_t epilogue
 );
-
 
 
 
